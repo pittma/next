@@ -2,6 +2,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE PolyKinds #-}
 
 module Door where
 
@@ -21,15 +22,21 @@ data Door s a where
 -- Just so we can show our Door.
 deriving instance Show a => Show (Door s a)
 
--- Define our FSM as type family relationships in the context of Next.
---
--- NB(pittma):
---   This is where we break down at the current juncture. Open TF
---   instances are required to be unique.  This results in us
---   only being able to traverse type-level _paths_, not whole FSMs.
-type instance Next 'Open = 'Closed
+-- Define our egresses as constraints.  This allows us to have multiple outputs from a single
+-- input.
+class OpenEgress s
 
-type instance Next 'Closed = 'Open
+class ClosedEgress s
+
+-- Map our states to their egresses
+instance OpenEgress 'Closed
+
+instance ClosedEgress 'Open
+
+-- Define our FSM as type family relationships in the context of Next.
+type instance Next 'Open = OpenEgress
+
+type instance Next 'Closed = ClosedEgress
 
 -- Write our FSM instances.
 instance FSMFunctor Door where
@@ -46,6 +53,12 @@ instance FSMMonad Door where
   (->>=) (OpenDoor x) f = f x
   (->>=) (ClosedDoor x) f = f x
 
+openDoor :: String -> Door 'Open String
+openDoor x = OpenDoor ("dependent " ++ x ++ "! (kind of)")
+
+closeDoor :: String -> Door 'Closed String
+closeDoor = ClosedDoor
+
 run :: IO ()
 run = do
   let d = fsmPure "types" :: Door 'Closed String
@@ -53,11 +66,11 @@ run = do
   putStrLn "Should we open it? (y/n)"
   ans <- getLine
   case ans of
-    "y"
-      -- Now we're going to open our door!
-     -> do
-      let d' = d ->>= \x -> OpenDoor ("dependent " ++ x ++ "! (kind of)")
-      putStrLn "Door opened!"
+    "y" -> do
+      let d' = d ->>= openDoor ->>= closeDoor
+      putStrLn
+        "Door opened (and then closed again) and we did some computations in the meantime."
+      putStrLn "See for yourself:"
       print d'
     "n" -> putStrLn "okay, then. Goodbye!"
     _ -> putStrLn (ans ++ " is not a valid input")
